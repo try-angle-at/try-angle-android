@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TryAngle</string>
+    <string name="camera_permission_required">카메라 권한이 필요합니다</string>
+    <string name="grant_permission">권한 허용</string>
+    <string name="capture_photo">사진 촬영</string>
+    <string name="switch_camera">카메라 전환</string>
+</resources>
