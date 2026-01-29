@@ -28,8 +28,8 @@ object PreviewSize {
         characteristics: CameraCharacteristics,
         surfaceWidth: Int,
         surfaceHeight: Int,
-        maxWidth: Int = 1920,
-        maxHeight: Int = 1080
+        maxWidth: Int = 3840,  // 4K 지원
+        maxHeight: Int = 2160
     ): Size {
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             ?: return Size(surfaceWidth, surfaceHeight)
@@ -40,30 +40,29 @@ object PreviewSize {
         val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         val swappedDimensions = sensorOrientation == 90 || sensorOrientation == 270
 
-        // 회전 고려
+        // 회전 고려한 실제 화면 크기
         val rotatedWidth = if (swappedDimensions) surfaceHeight else surfaceWidth
         val rotatedHeight = if (swappedDimensions) surfaceWidth else surfaceHeight
 
-        // 최대 크기 제한
-        val effectiveMaxWidth = rotatedWidth.coerceAtMost(maxWidth)
-        val effectiveMaxHeight = rotatedHeight.coerceAtMost(maxHeight)
-
-        // Aspect ratio
+        // Aspect ratio (화면 비율)
         val targetRatio = rotatedWidth.toFloat() / rotatedHeight.toFloat()
 
-        // 지원하는 크기 중 최적 크기 선택
+        // 화면을 꽉 채울 수 있는 크기 중에서 선택
+        // 1. aspect ratio가 비슷한 것
+        // 2. 해상도가 높은 것 우선
         val optimalSizes = supportedSizes
             .filter { size ->
-                size.width <= effectiveMaxWidth && 
-                size.height <= effectiveMaxHeight &&
-                size.height == size.width * rotatedHeight / rotatedWidth
+                size.width <= maxWidth && size.height <= maxHeight &&
+                // Float 비교로 aspect ratio 체크 (5% 오차 허용 - 더 관대하게)
+                abs(size.width.toFloat() / size.height.toFloat() - targetRatio) < 0.05f
             }
+            .sortedByDescending { it.width * it.height }  // 큰 해상도 우선
 
         return if (optimalSizes.isNotEmpty()) {
-            // 가장 큰 크기 선택
-            optimalSizes.maxByOrNull { it.width * it.height }!!
+            // 가장 큰 크기 선택 (화면을 꽉 채우기 위해)
+            optimalSizes.first()
         } else {
-            // 비율이 가장 비슷한 크기 선택
+            // 비율이 정확히 맞지 않아도 가장 비슷한 크기 선택
             supportedSizes
                 .filter { it.width <= maxWidth && it.height <= maxHeight }
                 .minByOrNull { size ->
@@ -135,8 +134,8 @@ object PreviewSize {
      */
     fun findClosest16By9Size(
         sizes: Array<Size>,
-        maxWidth: Int = 1920,
-        maxHeight: Int = 1080
+        maxWidth: Int = 3840,
+        maxHeight: Int = 2160
     ): Size? {
         val target16By9 = 16f / 9f
 

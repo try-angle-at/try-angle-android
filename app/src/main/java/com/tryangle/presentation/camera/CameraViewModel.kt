@@ -17,6 +17,7 @@ class CameraViewModel @Inject constructor(
 ) : ViewModel() {
 
     val cameraState: StateFlow<CameraState> = cameraManager.state
+    val zoomRatio: StateFlow<Float> = cameraManager.zoomRatio
 
     fun onResume() {
         viewModelScope.launch {
@@ -49,5 +50,40 @@ class CameraViewModel @Inject constructor(
      */
     fun getOptimalPreviewSize(width: Int, height: Int): Size {
         return cameraManager.getOptimalPreviewSize(width, height)
+    }
+    
+    /**
+     * Get maximum zoom ratio
+     */
+    fun getMaxZoom(): Float {
+        return cameraManager.getMaxZoom()
+    }
+    
+    /**
+     * Set zoom ratio
+     */
+    fun setZoom(ratio: Float) {
+        cameraManager.setZoom(ratio)
+    }
+    
+    /**
+     * Set frame rate
+     */
+    fun setFrameRate(fps: Int) {
+        cameraManager.setFrameRate(fps)
+    }
+    
+    /**
+     * Set exposure compensation
+     */
+    fun setExposure(value: Int) {
+        cameraManager.setExposureCompensation(value)
+    }
+    
+    /**
+     * Set focus mode
+     */
+    fun setFocusMode(auto: Boolean) {
+        cameraManager.setFocusMode(auto)
     }
 }

@@ -5,6 +5,8 @@ import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.view.Surface
 import android.view.TextureView
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
@@ -12,6 +14,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -42,29 +46,44 @@ fun CameraScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .clipToBounds()
+    ) {
         when (permissionState) {
             PermissionState.Granted -> {
                 if (cameraState is CameraState.Opened || cameraState is CameraState.Streaming) {
-                    CameraTexturePreview(
-                        viewModel = viewModel,
-                        onSurfaceReady = { surface ->
-                            scope.launch {
-                                viewModel.startPreview(surface)
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        CameraTexturePreview(
+                            viewModel = viewModel,
+                            onSurfaceReady = { surface ->
+                                scope.launch {
+                                    viewModel.startPreview(surface)
+                                }
                             }
-                        }
-                    )
+                        )
+                        CameraControlsOverlay(viewModel = viewModel)
+                    }
                 } else if (cameraState is CameraState.Error) {
                     Text(
                         text = (cameraState as CameraState.Error).message,
-                        modifier = Modifier.align(Alignment.Center)
+                        modifier = Modifier.align(Alignment.Center),
+                        color = Color.White
                     )
                 } else {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center),
+                        color = Color.White
+                    )
                 }
             }
             else -> {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                CircularProgressIndicator(
+                    modifier = Modifier.align(Alignment.Center),
+                    color = Color.White
+                )
             }
         }
     }
@@ -78,18 +97,17 @@ fun CameraTexturePreview(
     val context = LocalContext.current
     val activity = context as? Activity
     
+    var currentZoom by remember { mutableStateOf(1.0f) }
+    val maxZoom = remember { viewModel.getMaxZoom() }
+    
     AndroidView(
         factory = { ctx ->
             TextureView(ctx).apply {
                 surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                     override fun onSurfaceTextureAvailable(st: SurfaceTexture, width: Int, height: Int) {
-                        // 1. 최적 프리뷰 크기 가져오기
                         val previewSize = viewModel.getOptimalPreviewSize(width, height)
-                        
-                        // 2. SurfaceTexture 크기 설정
                         st.setDefaultBufferSize(previewSize.width, previewSize.height)
                         
-                        // 3. 변환 매트릭스 적용
                         activity?.let { act ->
                             configureTransform(
                                 view = this@apply,
@@ -102,13 +120,11 @@ fun CameraTexturePreview(
                             )
                         }
                         
-                        // 4. 프리뷰 시작
                         onSurfaceReady(Surface(st))
                     }
 
                     override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, width: Int, height: Int) {
                         val previewSize = viewModel.getOptimalPreviewSize(width, height)
-                        
                         activity?.let { act ->
                             configureTransform(
                                 view = this@apply,
@@ -127,15 +143,17 @@ fun CameraTexturePreview(
                 }
             }
         },
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTransformGestures { _, _, zoom, _ ->
+                    currentZoom = (currentZoom * zoom).coerceIn(1.0f, maxZoom)
+                    viewModel.setZoom(currentZoom)
+                }
+            }
     )
 }
 
-/**
- * 카메라 프리뷰 변환 매트릭스 설정
- * 
- * 디버그: 로그를 찍어서 실제 값 확인
- */
 private fun configureTransform(
     view: TextureView,
     viewWidth: Int,
@@ -145,40 +163,17 @@ private fun configureTransform(
     sensorOrientation: Int,
     displayRotation: Int
 ) {
-    android.util.Log.d("CameraTransform", "===== Camera Transform Debug =====")
-    android.util.Log.d("CameraTransform", "View Size: ${viewWidth}x${viewHeight}")
-    android.util.Log.d("CameraTransform", "Preview Size: ${previewWidth}x${previewHeight}")
-    android.util.Log.d("CameraTransform", "Sensor Orientation: $sensorOrientation")
-    android.util.Log.d("CameraTransform", "Display Rotation: $displayRotation")
-    
     val matrix = Matrix()
     val centerX = viewWidth / 2f
     val centerY = viewHeight / 2f
     
-    // 테스트: 0도 회전 (회전 없음)
-    val rotation = 0f
-    
-    android.util.Log.d("CameraTransform", "Applying Rotation: ${rotation}도")
-    
-    if (rotation != 0f) {
-        matrix.postRotate(rotation, centerX, centerY)
-    }
-    
-    // 회전 후 크기
-    val rotatedWidth = if (rotation % 180f != 0f) previewHeight else previewWidth
-    val rotatedHeight = if (rotation % 180f != 0f) previewWidth else previewHeight
-    
-    android.util.Log.d("CameraTransform", "Rotated Size: ${rotatedWidth}x${rotatedHeight}")
-    
-    // 화면에 맞게 스케일
-    val scaleX = viewWidth.toFloat() / rotatedWidth
-    val scaleY = viewHeight.toFloat() / rotatedHeight
-    val scale = maxOf(scaleX, scaleY)
-    
-    android.util.Log.d("CameraTransform", "Scale: $scale (scaleX=$scaleX, scaleY=$scaleY)")
+    // 회전 없음 - 카메라가 이미 올바른 방향으로 설정됨
+    // 단순히 화면을 꽉 채우도록 스케일만 조정
+    val scaleX = viewWidth.toFloat() / previewWidth
+    val scaleY = viewHeight.toFloat() / previewHeight
+    val scale = maxOf(scaleX, scaleY)  // 화면을 꽉 채움
     
     matrix.postScale(scale, scale, centerX, centerY)
     
     view.setTransform(matrix)
-    android.util.Log.d("CameraTransform", "Transform applied!")
 }

@@ -57,6 +57,15 @@ app/src/main/java/com/tryangle/
 - [x] 이미지 캡처
 - [x] 이미지 처리 (YUV → RGB)
 - [x] 단위 테스트 작성
+- [x] **버그 수정**:
+  - [x] 카메라 배율 수정 (2배 → 1배)
+  - [x] 화질 개선 (1080p → 4K 지원)
+  - [x] 왜곡 수정 (aspect ratio 정확도 향상)
+- [x] **카메라 제어 기능**:
+  - [x] 줌 제어 (Pinch-to-zoom + 슬라이더)
+  - [x] 프레임레이트 조절 (30fps ↔ 60fps)
+  - [x] 노출 보정
+  - [x] 포커스 모드 전환
 
 ### 📅 Phase 3: AI 모델 통합 (예정)
 - [ ] ONNX → TFLite 모델 변환

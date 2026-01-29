@@ -51,6 +51,13 @@ class CameraManager @Inject constructor(
     private val _state = MutableStateFlow<CameraState>(CameraState.Idle)
     val state: StateFlow<CameraState> = _state.asStateFlow()
     
+    // Zoom control
+    private val _zoomRatio = MutableStateFlow(1.0f)
+    val zoomRatio: StateFlow<Float> = _zoomRatio.asStateFlow()
+    
+    private var maxZoom: Float = 1.0f
+    private var previewRequest: CaptureRequest.Builder? = null
+    
     suspend fun openCamera(config: CameraConfig = CameraConfig.DEFAULT) {
         if (_state.value.isActive()) return
         
@@ -102,7 +109,8 @@ class CameraManager @Inject constructor(
             val session = createCaptureSession(device, surfaces)
             captureSession = session
             
-            val captureRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+            // Save request builder for dynamic control
+            previewRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(surface)
                 addTarget(imageReader!!.surface)
                 
@@ -117,9 +125,12 @@ class CameraManager @Inject constructor(
 
                 // 비디오 안정화가 프레임드랍을 유발할 수 있으므로 설정 확인 필요
                 set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
-            }.build()
+            }
             
-            session.setRepeatingRequest(captureRequest, null, cameraHandler)
+            // Initialize max zoom
+            maxZoom = getMaxZoom()
+            
+            session.setRepeatingRequest(previewRequest!!.build(), null, cameraHandler)
             _state.value = CameraState.Streaming
 
         } catch (e: Exception) {
@@ -238,6 +249,123 @@ class CameraManager @Inject constructor(
             currentConfig.previewWidth,
             currentConfig.previewHeight
         )
+    }
+    
+    /**
+     * Get maximum zoom ratio
+     */
+    fun getMaxZoom(): Float {
+        val characteristics = getCameraCharacteristics() ?: return 1.0f
+        return characteristics.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1.0f
+    }
+    
+    /**
+     * Set zoom ratio
+     * 
+     * @param ratio Zoom ratio (1.0 = no zoom, higher = more zoom)
+     */
+    fun setZoom(ratio: Float) {
+        val session = captureSession ?: return
+        val request = previewRequest ?: return
+        
+        val clampedRatio = ratio.coerceIn(1.0f, maxZoom)
+        _zoomRatio.value = clampedRatio
+        
+        // Camera2 uses crop region for zoom
+        val characteristics = getCameraCharacteristics() ?: return
+        val sensorRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
+        
+        val cropWidth = (sensorRect.width() / clampedRatio).toInt()
+        val cropHeight = (sensorRect.height() / clampedRatio).toInt()
+        val cropX = (sensorRect.width() - cropWidth) / 2
+        val cropY = (sensorRect.height() - cropHeight) / 2
+        
+        val cropRegion = android.graphics.Rect(cropX, cropY, cropX + cropWidth, cropY + cropHeight)
+        request.set(CaptureRequest.SCALER_CROP_REGION, cropRegion)
+        
+        try {
+            session.setRepeatingRequest(request.build(), null, cameraHandler)
+        } catch (e: Exception) {
+            Log.e("CameraManager", "Failed to set zoom: ${e.message}")
+        }
+    }
+    
+    /**
+     * Set frame rate
+     * 
+     * @param fps Target frame rate (30 or 60)
+     */
+    fun setFrameRate(fps: Int) {
+        val session = captureSession ?: return
+        val request = previewRequest ?: return
+        val device = cameraDevice ?: return
+        
+        val fpsRange = selectBestFpsRange(device.id, fps)
+        request.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
+        
+        try {
+            session.setRepeatingRequest(request.build(), null, cameraHandler)
+            currentConfig = currentConfig.copy(targetFps = fps)
+            Log.d("CameraManager", "Frame rate set to $fps fps")
+        } catch (e: Exception) {
+            Log.e("CameraManager", "Failed to set frame rate: ${e.message}")
+        }
+    }
+    
+    /**
+     * Get supported FPS ranges
+     */
+    fun getSupportedFpsRanges(): Array<Range<Int>> {
+        val characteristics = getCameraCharacteristics() ?: return emptyArray()
+        return characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: emptyArray()
+    }
+    
+    /**
+     * Set exposure compensation
+     * 
+     * @param value Exposure compensation value (negative = darker, positive = brighter)
+     */
+    fun setExposureCompensation(value: Int) {
+        val session = captureSession ?: return
+        val request = previewRequest ?: return
+        
+        val characteristics = getCameraCharacteristics() ?: return
+        val range = characteristics.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE) ?: return
+        
+        val clampedValue = value.coerceIn(range.lower, range.upper)
+        request.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, clampedValue)
+        
+        try {
+            session.setRepeatingRequest(request.build(), null, cameraHandler)
+            Log.d("CameraManager", "Exposure compensation set to $clampedValue")
+        } catch (e: Exception) {
+            Log.e("CameraManager", "Failed to set exposure: ${e.message}")
+        }
+    }
+    
+    /**
+     * Set focus mode
+     * 
+     * @param auto True for auto focus, false for manual
+     */
+    fun setFocusMode(auto: Boolean) {
+        val session = captureSession ?: return
+        val request = previewRequest ?: return
+        
+        val mode = if (auto) {
+            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
+        } else {
+            CaptureRequest.CONTROL_AF_MODE_OFF
+        }
+        
+        request.set(CaptureRequest.CONTROL_AF_MODE, mode)
+        
+        try {
+            session.setRepeatingRequest(request.build(), null, cameraHandler)
+            Log.d("CameraManager", "Focus mode set to ${if (auto) "auto" else "manual"}")
+        } catch (e: Exception) {
+            Log.e("CameraManager", "Failed to set focus mode: ${e.message}")
+        }
     }
 
     private fun findCamera(lensFacing: Int): String? {
