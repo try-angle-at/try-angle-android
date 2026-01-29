@@ -2,17 +2,6 @@
 
 iOS tryAngle 앱의 Android 포팅 프로젝트
 
-## 프로젝트 개요
-
-TryAngle은 AI 기반 카메라 가이드 앱으로, 실시간으로 사진 구도를 분석하고 피드백을 제공합니다.
-
-### 핵심 기능
-
-- **실시간 포즈 검출**: RTMPose 모델을 사용한 17개 관절 검출
-- **5단계 Gate 시스템**: 화면 비율, 프레이밍, 위치, 거리, 포즈 검증
-- **실시간 피드백**: 사용자에게 즉각적인 구도 개선 가이드 제공
-- **고해상도 촬영**: 완벽한 구도가 완성되면 고화질 사진 촬영
-
 ## 기술 스택
 
 - **언어**: Kotlin 1.9+
@@ -23,7 +12,7 @@ TryAngle은 AI 기반 카메라 가이드 앱으로, 실시간으로 사진 구�
 - **비동기**: Coroutines + Flow
 - **아키텍처**: Clean Architecture + MVVM
 
-## 프로젝트 구조
+## 프로젝트 구조 (계획)
 
 ```
 app/src/main/java/com/tryangle/
@@ -52,28 +41,6 @@ app/src/main/java/com/tryangle/
     └── theme/             # Material3 테마
 ```
 
-## 빌드 방법
-
-### 요구사항
-
-- Android Studio Hedgehog (2023.1.1) 이상
-- JDK 17
-- Android SDK 34
-- Gradle 8.2
-
-### 빌드 실행
-
-```bash
-# 의존성 다운로드 및 빌드
-./gradlew build
-
-# 단위 테스트 실행
-./gradlew test
-
-# 디버그 APK 생성
-./gradlew assembleDebug
-```
-
 ## 개발 로드맵
 
 ### ✅ Phase 1: Foundation (완료)
@@ -83,11 +50,13 @@ app/src/main/java/com/tryangle/
 - [x] GuideEngine 구현
 - [x] 단위 테스트 작성
 
-### 🔄 Phase 2: Camera2 구현 (예정)
-- [ ] CameraManager 구현
-- [ ] 권한 처리
-- [ ] 60fps 프리뷰
-- [ ] 이미지 캡처
+### ✅ Phase 2: Camera2 구현 (완료)
+- [x] CameraManager 구현
+- [x] 권한 처리
+- [x] 60fps 프리뷰
+- [x] 이미지 캡처
+- [x] 이미지 처리 (YUV → RGB)
+- [x] 단위 테스트 작성
 
 ### 📅 Phase 3: AI 모델 통합 (예정)
 - [ ] ONNX → TFLite 모델 변환
