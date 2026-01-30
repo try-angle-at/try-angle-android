@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.tryangle.platform.camera.CameraConfig
 import com.tryangle.platform.camera.CameraManager
 import com.tryangle.platform.camera.CameraState
+import com.tryangle.platform.camera.FlashMode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -18,6 +19,7 @@ class CameraViewModel @Inject constructor(
 
     val cameraState: StateFlow<CameraState> = cameraManager.state
     val zoomRatio: StateFlow<Float> = cameraManager.zoomRatio
+    val flashMode: StateFlow<FlashMode> = cameraManager.flashMode
 
     fun onResume() {
         viewModelScope.launch {
@@ -85,5 +87,42 @@ class CameraViewModel @Inject constructor(
      */
     fun setFocusMode(auto: Boolean) {
         cameraManager.setFocusMode(auto)
+    }
+    
+    /**
+     * Toggle flash mode
+     */
+    fun setFlashMode(mode: FlashMode) {
+        cameraManager.setFlashMode(mode)
+    }
+    
+    /**
+     * Switch between front and back camera
+     */
+    fun switchCamera() {
+        viewModelScope.launch {
+            try {
+                cameraManager.switchCamera()
+            } catch (e: Exception) {
+                // Handle error
+            }
+        }
+    }
+    
+    /**
+     * Capture photo
+     */
+    fun capturePhoto(onCaptured: (ByteArray) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val imageData = cameraManager.captureImage()
+                // 널 체크를 통해 타입 안전성 확보
+                if (imageData != null) {
+                    onCaptured(imageData)
+                }
+            } catch (e: Exception) {
+                // Handle error
+            }
+        }
     }
 }
