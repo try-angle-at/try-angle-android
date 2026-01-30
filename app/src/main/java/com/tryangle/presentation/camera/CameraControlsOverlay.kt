@@ -1,9 +1,11 @@
 package com.tryangle.presentation.camera
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -13,11 +15,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.tryangle.platform.camera.FlashMode
 
 /**
- * Galaxy-style camera UI overlay
+ * Galaxy-style camera UI overlay - 최종 래퍼런스 디자인 적용 (가이드 문구 제거 버전)
  */
 @Composable
 fun CameraControlsOverlay(
@@ -26,13 +30,16 @@ fun CameraControlsOverlay(
 ) {
     val flashMode by viewModel.flashMode.collectAsState()
     var currentZoomLevel by remember { mutableStateOf(1.0f) }
-    var selectedMode by remember { mutableStateOf(CameraMode.PHOTO) }
+    var selectedMode by remember { mutableStateOf(CameraMode.CAMERA) }
     
     val maxZoom = remember { viewModel.getMaxZoom() }
     
     Box(modifier = modifier.fillMaxSize()) {
-        // Top Bar
-        TopBar(
+        // 1. 최상단 상태 칩 (비율, 샷타입, 위치 등)
+        StatusHeader(modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp))
+
+        // 2. 상단 제어 바 (플래시, 설정 등)
+        TopControlBar(
             flashMode = flashMode,
             onFlashToggle = { 
                 val newMode = when (flashMode) {
@@ -42,10 +49,10 @@ fun CameraControlsOverlay(
                 }
                 viewModel.setFlashMode(newMode)
             },
-            modifier = Modifier.align(Alignment.TopCenter)
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 60.dp)
         )
         
-        // Bottom Controls
+        // 하단 영역
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -53,7 +60,7 @@ fun CameraControlsOverlay(
                 .padding(bottom = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Zoom Level Selection
+            // 3. 줌 선택 바 (.6, 1.0x, 2, 3)
             ZoomLevelBar(
                 currentZoom = currentZoomLevel,
                 maxZoom = maxZoom,
@@ -64,7 +71,7 @@ fun CameraControlsOverlay(
                 modifier = Modifier.padding(bottom = 24.dp)
             )
             
-            // Main Controls (Grid, Shutter, Camera Switch)
+            // 4. 메인 액션 버튼 (갤러리, 셔터, 전환)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -72,45 +79,39 @@ fun CameraControlsOverlay(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Grid toggle
-                IconButton(
-                    onClick = { /* TODO: Toggle grid */ },
-                    modifier = Modifier.size(48.dp)
+                // 갤러리 썸네일
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Gray)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.GridOn,
-                        contentDescription = "Grid",
-                        tint = Color.White,
-                        modifier = Modifier.size(28.dp)
-                    )
+                    // TODO: 최근 이미지 표시
                 }
                 
-                // Shutter Button
+                // 셔터 버튼
                 ShutterButton(
                     onClick = {
-                        viewModel.capturePhoto { imageData ->
-                            // TODO: Save image
-                            android.util.Log.d("CameraUI", "Captured ${imageData.size} bytes")
-                        }
+                        viewModel.capturePhoto { /* Save */ }
                     },
-                    modifier = Modifier.size(72.dp)
+                    modifier = Modifier.size(80.dp)
                 )
                 
-                // Camera switch
+                // 카메라 전환
                 IconButton(
                     onClick = { viewModel.switchCamera() },
                     modifier = Modifier.size(48.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Cameraswitch,
-                        contentDescription = "Switch Camera",
+                        contentDescription = "Switch",
                         tint = Color.White,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(32.dp)
                     )
                 }
             }
             
-            // Bottom Mode Navigation
+            // 5. 하단 모드 네비게이션
             ModeNavigationBar(
                 selectedMode = selectedMode,
                 onModeSelected = { selectedMode = it },
@@ -121,177 +122,134 @@ fun CameraControlsOverlay(
 }
 
 @Composable
-fun TopBar(
-    flashMode: FlashMode,
-    onFlashToggle: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
+fun StatusHeader(modifier: Modifier = Modifier) {
+    Surface(
+        color = Color.Black.copy(alpha = 0.4f),
+        shape = RoundedCornerShape(20.dp),
         modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Flash toggle
-            IconButton(onClick = onFlashToggle) {
-                Icon(
-                    imageVector = when (flashMode) {
-                        FlashMode.OFF -> Icons.Default.FlashOff
-                        FlashMode.ON -> Icons.Default.FlashOn
-                        FlashMode.AUTO -> Icons.Default.FlashAuto
-                    },
-                    contentDescription = "Flash",
-                    tint = Color.White
-                )
-            }
-            
-            // Resolution indicator
-            Surface(
-                color = Color.White.copy(alpha = 0.2f),
-                shape = MaterialTheme.shapes.small
-            ) {
-                Text(
-                    text = "12M",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                )
-            }
-            
-            // Aspect ratio
-            IconButton(onClick = { /* TODO: Change aspect ratio */ }) {
-                Icon(
-                    imageVector = Icons.Default.AspectRatio,
-                    contentDescription = "Aspect Ratio",
-                    tint = Color.White
-                )
-            }
-        }
-        
-        // Settings
-        IconButton(onClick = { /* TODO: Open settings */ }) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Settings",
-                tint = Color.White
-            )
+            StatusItem(label = "비율", isActive = true)
+            StatusItem(label = "샷타입", isActive = false)
+            StatusItem(label = "위치", isActive = false)
+            StatusItem(label = "줌", isActive = false)
+            StatusItem(label = "포즈", isActive = false)
         }
     }
 }
 
 @Composable
-fun ZoomLevelBar(
-    currentZoom: Float,
-    maxZoom: Float,
-    onZoomSelected: (Float) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val zoomLevels = listOf(0.6f, 1.0f, 2.0f, 3.0f).filter { it <= maxZoom }
-    
+fun StatusItem(label: String, isActive: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(
+            modifier = Modifier
+                .size(14.dp)
+                .clip(CircleShape)
+                .background(if (isActive) Color(0xFF4CAF50) else Color.Transparent)
+                .then(if (!isActive) Modifier.background(Color.White.copy(alpha = 0.5f)) else Modifier)
+        ) {
+            if (isActive) Icon(Icons.Default.Check, null, tint = Color.Black, modifier = Modifier.size(10.dp).align(Alignment.Center))
+        }
+        Text(text = label, color = Color.White, fontSize = 12.sp)
+    }
+}
+
+@Composable
+fun TopControlBar(flashMode: FlashMode, onFlashToggle: () -> Unit, modifier: Modifier = Modifier) {
     Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(24.dp),
-        verticalAlignment = Alignment.CenterVertically
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        zoomLevels.forEach { zoom ->
-            ZoomLevelButton(
-                zoom = zoom,
-                isSelected = kotlin.math.abs(currentZoom - zoom) < 0.1f,
-                onClick = { onZoomSelected(zoom) }
+        IconButton(onClick = onFlashToggle) {
+            Icon(
+                imageVector = when (flashMode) {
+                    FlashMode.OFF -> Icons.Default.FlashOff
+                    FlashMode.ON -> Icons.Default.FlashOn
+                    FlashMode.AUTO -> Icons.Default.FlashAuto
+                },
+                contentDescription = null, tint = Color.White
             )
+        }
+        IconButton(onClick = {}) { Icon(Icons.Default.Settings, null, tint = Color.White) }
+    }
+}
+
+@Composable
+fun ZoomLevelBar(currentZoom: Float, maxZoom: Float, onZoomSelected: (Float) -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        color = Color.Black.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(24.dp),
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            listOf(0.6f, 1.0f, 2.0f, 3.0f).filter { it <= maxZoom }.forEach { zoom ->
+                val isSelected = kotlin.math.abs(currentZoom - zoom) < 0.1f
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(if (isSelected) Color.Yellow.copy(alpha = 0.8f) else Color.Transparent)
+                        .clickable { onZoomSelected(zoom) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (zoom == 1.0f) "1.0x" else if (zoom < 1f) ".6" else zoom.toInt().toString(),
+                        color = if (isSelected) Color.Black else Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-fun ZoomLevelButton(
-    zoom: Float,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    val label = when {
-        zoom < 1.0f -> ".${(zoom * 10).toInt()}"
-        zoom == 1.0f -> "1×"
-        else -> ".${zoom.toInt()}"
-    }
-    
-    Text(
-        text = label,
-        color = if (isSelected) Color.White else Color.White.copy(alpha = 0.6f),
-        style = if (isSelected) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
-        modifier = Modifier
-            .clickable(onClick = onClick)
-            .padding(8.dp)
-    )
-}
-
-@Composable
-fun ShutterButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+fun ShutterButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .clip(CircleShape)
-            .background(Color.White.copy(alpha = 0.3f))
+            .background(Color.White.copy(alpha = 0.2f))
+            .padding(4.dp)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = Modifier
-                .size(60.dp)
-                .clip(CircleShape)
-                .background(Color.White)
-        )
+        Surface(
+            modifier = Modifier.fillMaxSize().padding(4.dp),
+            shape = CircleShape,
+            color = Color.White,
+            border = BorderStroke(2.dp, Color.Black.copy(alpha = 0.1f))
+        ) {}
     }
 }
 
 @Composable
-fun ModeNavigationBar(
-    selectedMode: CameraMode,
-    onModeSelected: (CameraMode) -> Unit,
-    modifier: Modifier = Modifier
-) {
+fun ModeNavigationBar(selectedMode: CameraMode, onModeSelected: (CameraMode) -> Unit, modifier: Modifier = Modifier) {
     Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 8.dp),
+        modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceEvenly
     ) {
         CameraMode.values().forEach { mode ->
-            ModeTab(
-                mode = mode,
-                isSelected = selectedMode == mode,
-                onClick = { onModeSelected(mode) }
+            Text(
+                text = mode.label,
+                color = if (selectedMode == mode) Color.White else Color.White.copy(alpha = 0.5f),
+                fontSize = 14.sp,
+                fontWeight = if (selectedMode == mode) FontWeight.Bold else FontWeight.Normal,
+                modifier = Modifier.clickable { onModeSelected(mode) }.padding(12.dp)
             )
         }
     }
 }
 
-@Composable
-fun ModeTab(
-    mode: CameraMode,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    Text(
-        text = mode.label,
-        color = if (isSelected) Color.White else Color.White.copy(alpha = 0.6f),
-        style = MaterialTheme.typography.bodyMedium,
-        modifier = Modifier
-            .clickable(onClick = onClick)
-            .padding(8.dp)
-    )
-}
-
 enum class CameraMode(val label: String) {
-    PORTRAIT("인물 사진"),
-    PHOTO("사진"),
-    VIDEO("동영상"),
-    MORE("더보기")
+    GALLERY("갤러리"),
+    CAMERA("카메라"),
+    REFERENCE("레퍼런스")
 }

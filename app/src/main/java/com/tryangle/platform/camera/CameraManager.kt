@@ -1,7 +1,6 @@
 package com.tryangle.platform.camera
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.hardware.camera2.*
@@ -33,7 +32,7 @@ enum class FlashMode {
 }
 
 /**
- * Camera2 API 매니저 - 갤럭시 S25 4K 60fps 최적화 버전
+ * Camera2 API 매니저 - 플래시 및 제어 기능 최적화 버전
  */
 @Singleton
 class CameraManager @Inject constructor(
@@ -64,54 +63,43 @@ class CameraManager @Inject constructor(
     private var maxZoom: Float = 1.0f
     private var previewRequest: CaptureRequest.Builder? = null
     
+    private val TAG = "CameraManager"
+
     suspend fun openCamera(config: CameraConfig = CameraConfig.DEFAULT) {
         if (_state.value.isActive()) return
-        
         _state.value = CameraState.Opening
         currentConfig = config
         
         try {
             val foundCameraId = findCamera(config.lensFacing)
-                ?: throw IllegalStateException("Camera not found")
+                ?: throw IllegalStateException("No camera found")
             
             cameraId = foundCameraId
             startCameraThread()
-            
-            val device = openCameraDevice(foundCameraId)
-            cameraDevice = device
-            
+            cameraDevice = openCameraDevice(foundCameraId)
             _state.value = CameraState.Opened
         } catch (e: Exception) {
-            _state.value = CameraState.Error("Failed to open camera: ${e.message}", e)
+            _state.value = CameraState.Error("Open failed: ${e.message}", e)
+            closeCamera()
             throw e
         }
     }
     
     suspend fun startPreview(surface: Surface) {
-        val device = cameraDevice ?: throw IllegalStateException("Camera not opened")
+        val device = cameraDevice ?: throw IllegalStateException("Device null")
         
         try {
-            imageReader = ImageReader.newInstance(
-                currentConfig.previewWidth,
-                currentConfig.previewHeight,
-                ImageFormat.YUV_420_888,
-                3
-            )
-            
-            imageReader?.setOnImageAvailableListener({ reader ->
-                reader.acquireLatestImage()?.close()
-            }, cameraHandler)
+            val chars = getCameraCharacteristics() ?: throw IllegalStateException("No chars")
+            val optimalSize = PreviewSize.chooseOptimalSize(chars, 1080, 1920, currentConfig.previewWidth, currentConfig.previewHeight)
 
-            captureImageReader = ImageReader.newInstance(
-                currentConfig.captureWidth,
-                currentConfig.captureHeight,
-                ImageFormat.JPEG,
-                2
-            )
+            imageReader = ImageReader.newInstance(optimalSize.width, optimalSize.height, ImageFormat.YUV_420_888, 3).apply {
+                setOnImageAvailableListener({ r -> r.acquireLatestImage()?.close() }, cameraHandler)
+            }
+
+            captureImageReader = ImageReader.newInstance(currentConfig.captureWidth, currentConfig.captureHeight, ImageFormat.JPEG, 2)
             
             val surfaces = listOf(surface, imageReader!!.surface, captureImageReader!!.surface)
-            val session = createCaptureSession(device, surfaces)
-            captureSession = session
+            captureSession = createCaptureSession(device, surfaces)
             
             previewRequest = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(surface)
@@ -119,67 +107,60 @@ class CameraManager @Inject constructor(
                 
                 val fpsRange = selectBestFpsRange(device.id, currentConfig.targetFps)
                 set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
-                set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
                 
-                applyFlashMode(this, _flashMode.value)
-                set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+                // 현재 플래시 모드 적용
+                applyFlashToRequestBuilder(this, _flashMode.value, isPreview = true)
             }
             
             maxZoom = getMaxZoom()
-            
-            session.setRepeatingRequest(previewRequest!!.build(), null, cameraHandler)
+            captureSession?.setRepeatingRequest(previewRequest!!.build(), null, cameraHandler)
             _state.value = CameraState.Streaming
 
         } catch (e: Exception) {
-            _state.value = CameraState.Error("Failed to start preview: ${e.message}", e)
+            _state.value = CameraState.Error("Preview failed: ${e.message}", e)
             throw e
         }
     }
 
-    private fun selectBestFpsRange(cameraId: String, targetFps: Int): Range<Int> {
-        val chars = cameraManager.getCameraCharacteristics(cameraId)
-        val ranges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: emptyArray()
-        ranges.find { it.lower == targetFps && it.upper == targetFps }?.let { return it }
-        return ranges.filter { it.upper >= targetFps }
-            .minByOrNull { it.lower } ?: Range(30, 30)
-    }
-    
-    fun previewFrames() = callbackFlow<CameraFrame.Preview> {
-        val reader = imageReader ?: return@callbackFlow
-        val listener = ImageReader.OnImageAvailableListener { r ->
-            val image = r.acquireLatestImage() ?: return@OnImageAvailableListener
-            val frame = CameraFrame.Preview(image, image.timestamp, 0)
-            if (!trySend(frame).isSuccess) image.close()
-        }
-        reader.setOnImageAvailableListener(listener, cameraHandler)
-        awaitClose { reader.setOnImageAvailableListener(null, null) }
-    }
-    
     fun setFlashMode(mode: FlashMode) {
         _flashMode.value = mode
         val session = captureSession ?: return
         val request = previewRequest ?: return
-        applyFlashMode(request, mode)
+        
+        applyFlashToRequestBuilder(request, mode, isPreview = true)
+        
         try {
             session.setRepeatingRequest(request.build(), null, cameraHandler)
+            Log.d(TAG, "Flash mode set to $mode")
         } catch (e: Exception) {
-            Log.e("CameraManager", "Flash error: ${e.message}")
+            Log.e(TAG, "Failed to set flash mode", e)
         }
     }
 
-    private fun applyFlashMode(builder: CaptureRequest.Builder, mode: FlashMode) {
+    private fun applyFlashToRequestBuilder(builder: CaptureRequest.Builder, mode: FlashMode, isPreview: Boolean) {
+        val chars = getCameraCharacteristics() ?: return
+        val hasFlash = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
+        if (!hasFlash) return
+
         when (mode) {
             FlashMode.OFF -> {
                 builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                 builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
             }
             FlashMode.ON -> {
-                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
-                builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
+                if (isPreview) {
+                    // 프리뷰 중에는 토치(조명)를 켜서 'ON'임을 알림
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
+                } else {
+                    // 실제 촬영 시에는 강제 플래시 발광
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+                }
             }
             FlashMode.AUTO -> {
                 builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
+                builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
             }
         }
     }
@@ -190,11 +171,9 @@ class CameraManager @Inject constructor(
         } else {
             CameraCharacteristics.LENS_FACING_BACK
         }
-        
         closeCamera()
         currentConfig = currentConfig.copy(lensFacing = newLensFacing)
         openCamera(currentConfig)
-        
         currentSurface?.let { startPreview(it) }
     }
 
@@ -203,110 +182,72 @@ class CameraManager @Inject constructor(
         val request = previewRequest ?: return
         val clampedRatio = ratio.coerceIn(1.0f, maxZoom)
         _zoomRatio.value = clampedRatio
-        
-        val characteristics = getCameraCharacteristics() ?: return
-        val sensorRect = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
-        
-        val cropWidth = (sensorRect.width() / clampedRatio).toInt()
-        val cropHeight = (sensorRect.height() / clampedRatio).toInt()
-        val cropX = (sensorRect.width() - cropWidth) / 2
-        val cropY = (sensorRect.height() - cropHeight) / 2
-        
-        request.set(CaptureRequest.SCALER_CROP_REGION, Rect(cropX, cropY, cropX + cropWidth, cropY + cropHeight))
-        try {
-            session.setRepeatingRequest(request.build(), null, cameraHandler)
-        } catch (e: Exception) {
-            Log.e("CameraManager", "Zoom failed: ${e.message}")
-        }
+        val sensorRect = getCameraCharacteristics()?.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: return
+        val cropW = (sensorRect.width() / clampedRatio).toInt()
+        val cropH = (sensorRect.height() / clampedRatio).toInt()
+        val cropX = (sensorRect.width() - cropW) / 2
+        val cropY = (sensorRect.height() - cropH) / 2
+        request.set(CaptureRequest.SCALER_CROP_REGION, Rect(cropX, cropY, cropX + cropW, cropY + cropH))
+        try { session.setRepeatingRequest(request.build(), null, cameraHandler) } catch (e: Exception) {}
     }
 
     fun setFrameRate(fps: Int) {
         val session = captureSession ?: return
         val request = previewRequest ?: return
-        val device = cameraDevice ?: return
-        val fpsRange = selectBestFpsRange(device.id, fps)
+        val fpsRange = selectBestFpsRange(cameraId ?: return, fps)
         request.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
-        try {
-            session.setRepeatingRequest(request.build(), null, cameraHandler)
+        try { 
+            session.setRepeatingRequest(request.build(), null, cameraHandler) 
             currentConfig = currentConfig.copy(targetFps = fps)
-        } catch (e: Exception) {
-            Log.e("CameraManager", "FPS fail: ${e.message}")
-        }
+        } catch (e: Exception) {}
     }
 
-    /**
-     * 노출 보정 설정
-     */
     fun setExposureCompensation(value: Int) {
         val session = captureSession ?: return
         val request = previewRequest ?: return
-        val characteristics = getCameraCharacteristics() ?: return
-        val range = characteristics.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE) ?: return
-        
-        val clampedValue = value.coerceIn(range.lower, range.upper)
-        request.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, clampedValue)
-        
-        try {
-            session.setRepeatingRequest(request.build(), null, cameraHandler)
-        } catch (e: Exception) {
-            Log.e("CameraManager", "Exposure failed: ${e.message}")
-        }
+        val range = getCameraCharacteristics()?.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE) ?: return
+        request.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, value.coerceIn(range.lower, range.upper))
+        try { session.setRepeatingRequest(request.build(), null, cameraHandler) } catch (e: Exception) {}
     }
 
-    /**
-     * 포커스 모드 설정
-     */
     fun setFocusMode(auto: Boolean) {
         val session = captureSession ?: return
         val request = previewRequest ?: return
+        request.set(CaptureRequest.CONTROL_AF_MODE, if (auto) CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE else CaptureRequest.CONTROL_AF_MODE_OFF)
+        try { session.setRepeatingRequest(request.build(), null, cameraHandler) } catch (e: Exception) {}
+    }
+
+    suspend fun captureImage(): ByteArray? = suspendCancellableCoroutine { cont ->
+        val reader = captureImageReader ?: run { cont.resume(null); return@suspendCancellableCoroutine }
+        val session = captureSession ?: run { cont.resume(null); return@suspendCancellableCoroutine }
         
-        val mode = if (auto) {
-            CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
-        } else {
-            CaptureRequest.CONTROL_AF_MODE_OFF
-        }
-        
-        request.set(CaptureRequest.CONTROL_AF_MODE, mode)
+        reader.setOnImageAvailableListener({ r ->
+            val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
+            try {
+                val buffer = image.planes[0].buffer
+                val bytes = ByteArray(buffer.remaining())
+                buffer.get(bytes)
+                if (cont.isActive) cont.resume(bytes)
+            } finally {
+                image.close()
+            }
+        }, cameraHandler)
         
         try {
-            session.setRepeatingRequest(request.build(), null, cameraHandler)
+            val request = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)?.apply {
+                addTarget(reader.surface)
+                // 캡처용 플래시 설정 적용
+                applyFlashToRequestBuilder(this, _flashMode.value, isPreview = false)
+            }?.build()
+            if (request != null) session.capture(request, null, cameraHandler)
         } catch (e: Exception) {
-            Log.e("CameraManager", "Focus failed: ${e.message}")
+            if (cont.isActive) cont.resume(null)
         }
     }
 
-    suspend fun captureImage(): ByteArray? {
-        val device = cameraDevice ?: return null
-        val session = captureSession ?: return null
-        val reader = captureImageReader ?: return null
-        
-        _state.value = CameraState.Capturing
-        return try {
-            suspendCancellableCoroutine { continuation ->
-                reader.setOnImageAvailableListener({ r ->
-                    val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    try {
-                        val buffer = image.planes[0].buffer
-                        val bytes = ByteArray(buffer.remaining())
-                        buffer.get(bytes)
-                        continuation.resume(bytes)
-                    } finally {
-                        image.close()
-                        _state.value = CameraState.Streaming
-                    }
-                }, cameraHandler)
-                
-                val request = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
-                    addTarget(reader.surface)
-                    applyFlashMode(this, _flashMode.value)
-                }.build()
-                session.capture(request, null, cameraHandler)
-            }
-        } catch (e: Exception) {
-            Log.e("CameraManager", "Capture fail: ${e.message}")
-            _state.value = CameraState.Streaming
-            null
-        }
+    private fun selectBestFpsRange(id: String, target: Int): Range<Int> {
+        val ranges = cameraManager.getCameraCharacteristics(id).get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: emptyArray()
+        return ranges.find { it.lower == target && it.upper == target } ?: ranges.filter { it.upper >= target }.minByOrNull { it.lower } ?: Range(30, 30)
     }
 
     fun closeCamera() {
@@ -331,47 +272,31 @@ class CameraManager @Inject constructor(
         return PreviewSize.chooseOptimalSize(chars, width, height, currentConfig.previewWidth, currentConfig.previewHeight)
     }
 
-    private fun findCamera(lensFacing: Int): String? = cameraManager.cameraIdList.find { id ->
-        cameraManager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING) == lensFacing
-    }
+    private fun findCamera(facing: Int): String? = cameraManager.cameraIdList.find { cameraManager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == facing }
     
     private suspend fun openCameraDevice(id: String): CameraDevice = suspendCancellableCoroutine { cont ->
         try {
             cameraManager.openCamera(id, object : CameraDevice.StateCallback() {
                 override fun onOpened(c: CameraDevice) = cont.resume(c)
-                override fun onDisconnected(c: CameraDevice) { c.close(); if(cont.isActive) cont.resumeWithException(IllegalStateException("Disconnected")) }
-                override fun onError(c: CameraDevice, e: Int) { c.close(); if(cont.isActive) cont.resumeWithException(IllegalStateException("Error: $e")) }
+                override fun onDisconnected(c: CameraDevice) { c.close(); if(cont.isActive) cont.resumeWithException(IllegalStateException()) }
+                override fun onError(c: CameraDevice, e: Int) { c.close(); if(cont.isActive) cont.resumeWithException(IllegalStateException()) }
             }, cameraHandler)
-        } catch (e: SecurityException) {
-            cont.resumeWithException(e)
-        }
+        } catch (e: Exception) { cont.resumeWithException(e) }
     }
     
     private suspend fun createCaptureSession(d: CameraDevice, s: List<Surface>): CameraCaptureSession = suspendCancellableCoroutine { cont ->
         val callback = object : CameraCaptureSession.StateCallback() {
             override fun onConfigured(session: CameraCaptureSession) = cont.resume(session)
-            override fun onConfigureFailed(s: CameraCaptureSession) = cont.resumeWithException(IllegalStateException("Session failed"))
+            override fun onConfigureFailed(s: CameraCaptureSession) = cont.resumeWithException(IllegalStateException())
         }
-        
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                // API 28+
-                val outputConfigs = s.map { OutputConfiguration(it) }
-                val sessionConfig = SessionConfiguration(
-                    SessionConfiguration.SESSION_REGULAR,
-                    outputConfigs,
-                    context.mainExecutor,
-                    callback
-                )
-                d.createCaptureSession(sessionConfig)
+                val configs = s.map { OutputConfiguration(it) }
+                d.createCaptureSession(SessionConfiguration(SessionConfiguration.SESSION_REGULAR, configs, context.mainExecutor, callback))
             } else {
-                // API 26, 27
-                @Suppress("DEPRECATION")
-                d.createCaptureSession(s, callback, cameraHandler)
+                @Suppress("DEPRECATION") d.createCaptureSession(s, callback, cameraHandler)
             }
-        } catch (e: Exception) {
-            cont.resumeWithException(e)
-        }
+        } catch (e: Exception) { cont.resumeWithException(e) }
     }
     
     private fun startCameraThread() {
