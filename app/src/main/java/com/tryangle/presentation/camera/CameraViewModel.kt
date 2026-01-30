@@ -24,7 +24,6 @@ class CameraViewModel @Inject constructor(
     fun onResume() {
         viewModelScope.launch {
             try {
-                // 후면 카메라 사용
                 cameraManager.openCamera(CameraConfig.BACK_CAMERA)
             } catch (e: Exception) {
                 // Handle error
@@ -40,65 +39,38 @@ class CameraViewModel @Inject constructor(
         cameraManager.startPreview(surface)
     }
     
-    /**
-     * 센서 방향 가져오기
-     */
     fun getSensorOrientation(): Int {
         return cameraManager.getSensorOrientation()
     }
     
-    /**
-     * 최적 프리뷰 크기 가져오기
-     */
     fun getOptimalPreviewSize(width: Int, height: Int): Size {
         return cameraManager.getOptimalPreviewSize(width, height)
     }
     
-    /**
-     * Get maximum zoom ratio
-     */
     fun getMaxZoom(): Float {
         return cameraManager.getMaxZoom()
     }
     
-    /**
-     * Set zoom ratio
-     */
     fun setZoom(ratio: Float) {
         cameraManager.setZoom(ratio)
     }
     
-    /**
-     * Set frame rate
-     */
     fun setFrameRate(fps: Int) {
         cameraManager.setFrameRate(fps)
     }
     
-    /**
-     * Set exposure compensation
-     */
     fun setExposure(value: Int) {
         cameraManager.setExposureCompensation(value)
     }
     
-    /**
-     * Set focus mode
-     */
     fun setFocusMode(auto: Boolean) {
         cameraManager.setFocusMode(auto)
     }
     
-    /**
-     * Toggle flash mode
-     */
     fun setFlashMode(mode: FlashMode) {
         cameraManager.setFlashMode(mode)
     }
     
-    /**
-     * Switch between front and back camera
-     */
     fun switchCamera() {
         viewModelScope.launch {
             try {
@@ -110,18 +82,23 @@ class CameraViewModel @Inject constructor(
     }
     
     /**
-     * Capture photo
+     * Capture and save photo with correct orientation
      */
-    fun capturePhoto(onCaptured: (ByteArray) -> Unit) {
+    fun savePhoto(context: android.content.Context, onSaved: (android.net.Uri?) -> Unit) {
         viewModelScope.launch {
             try {
                 val imageData = cameraManager.captureImage()
-                // 널 체크를 통해 타입 안전성 확보
                 if (imageData != null) {
-                    onCaptured(imageData)
+                    // 센서 방향을 가져와 저장 로직에 전달 (회전 문제 해결)
+                    val rotation = cameraManager.getSensorOrientation()
+                    val uri = com.tryangle.platform.storage.ImageSaver.saveImage(context, imageData, rotation)
+                    onSaved(uri)
+                } else {
+                    onSaved(null)
                 }
             } catch (e: Exception) {
-                // Handle error
+                android.util.Log.e("CameraViewModel", "Failed to save photo: ${e.message}")
+                onSaved(null)
             }
         }
     }

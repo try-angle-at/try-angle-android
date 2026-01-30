@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,6 +32,7 @@ fun CameraControlsOverlay(
     val flashMode by viewModel.flashMode.collectAsState()
     var currentZoomLevel by remember { mutableStateOf(1.0f) }
     var selectedMode by remember { mutableStateOf(CameraMode.CAMERA) }
+    val context = LocalContext.current
     
     val maxZoom = remember { viewModel.getMaxZoom() }
     
@@ -92,7 +94,9 @@ fun CameraControlsOverlay(
                 // 셔터 버튼
                 ShutterButton(
                     onClick = {
-                        viewModel.capturePhoto { /* Save */ }
+                        viewModel.savePhoto(context) { uri ->
+                            // TODO: Show captured image or toast
+                        }
                     },
                     modifier = Modifier.size(80.dp)
                 )
